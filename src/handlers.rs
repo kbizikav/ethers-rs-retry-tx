@@ -71,27 +71,9 @@ async fn send_tx_with_eip1559_gas_bump<S: ToString>(
     let mut current_tx = tx.clone();
     let mut attempt = 0;
     while attempt < max_attempts {
-        let base_fee = get_base_fee(client.provider().url().as_str()).await?;
-        let priority_fee = tx
-            .max_priority_fee_per_gas
-            .unwrap_or(U256::from(2_000_000_000));
-        let new_priority_fee = priority_fee * (100 + gas_bump_percentage) / 100;
-        current_tx.max_priority_fee_per_gas = Some(new_priority_fee);
-        current_tx.max_fee_per_gas = Some(base_fee * 2 + new_priority_fee);
-        log::info!(
-            "Bumping gas for {} tx attempt: {} with new max_fee_per_gas: {:?}, new max_priority_fee_per_gas: {:?}",
-            tx_name.to_string(),
-            attempt,
-            current_tx.max_fee_per_gas,
-            current_tx.max_priority_fee_per_gas
-        );
-        let pending_tx = client
-            .send_transaction(&current_tx, None)
-            .await
-            .map_err(|e| BlockchainError::RPCError(e.to_string()))?;
         sleep(wait_time).await;
         match client
-            .get_transaction_receipt(pending_tx.tx_hash())
+            .get_transaction_receipt(current_tx.hash)
             .await
             .map_err(|e| BlockchainError::RPCError(e.to_string()))?
         {
@@ -105,7 +87,27 @@ async fn send_tx_with_eip1559_gas_bump<S: ToString>(
                 }
                 return Ok(tx_receipt.transaction_hash);
             }
-            None => attempt += 1,
+            None => {
+                let base_fee = get_base_fee(client.provider().url().as_str()).await?;
+                let priority_fee = tx
+                    .max_priority_fee_per_gas
+                    .unwrap_or(U256::from(2_000_000_000));
+                let new_priority_fee = priority_fee * (100 + gas_bump_percentage) / 100;
+                current_tx.max_priority_fee_per_gas = Some(new_priority_fee);
+                current_tx.max_fee_per_gas = Some(base_fee * 2 + new_priority_fee);
+                log::info!(
+                    "Bumping gas for {} tx attempt: {} with new max_fee_per_gas: {:?}, new max_priority_fee_per_gas: {:?}",
+                    tx_name.to_string(),
+                    attempt,
+                    current_tx.max_fee_per_gas,
+                    current_tx.max_priority_fee_per_gas
+                );
+                client
+                    .send_transaction(&current_tx, None)
+                    .await
+                    .map_err(|e| BlockchainError::RPCError(e.to_string()))?;
+                attempt += 1;
+            }
         }
     }
     return Err(BlockchainError::MaxTxRetriesReached);
