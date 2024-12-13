@@ -1,6 +1,4 @@
-use std::str::FromStr as _;
-
-use ethers::types::H256;
+use ethers::types::{Address, U256};
 
 use crate::{erc20_contract::ERC20Contract, utils::get_address};
 
@@ -23,8 +21,9 @@ async fn approve_token() -> anyhow::Result<()> {
 
     let contract = ERC20Contract::new(&env.rpc_url, env.chain_id, contract_address.parse()?);
 
-    // let mut tx = contract.get_contract_with_signer(env.private_key).await?.approve(
-    //     env.private_key,
+    contract
+        .approve(env.private_key, Address::zero(), U256::zero())
+        .await?;
 
     Ok(())
 }

@@ -58,7 +58,7 @@ impl ERC20Contract {
         Ok(contract)
     }
 
-    async fn get_contract_with_signer(
+    pub async fn get_contract_with_signer(
         &self,
         private_key: H256,
     ) -> Result<ERC20<SignerMiddleware<Provider<Http>, Wallet<SigningKey>>>, BlockchainError> {
