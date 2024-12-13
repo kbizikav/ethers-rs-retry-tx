@@ -16,9 +16,10 @@ use crate::{
     utils::{estimate_eip1559_fees, get_base_fee},
 };
 
-const MAX_GAS_BUMP_ATTEMPTS: u32 = 3;
-const WAIT_TIME: Duration = Duration::from_secs(1);
-const GAS_BUMP_PERCENTAGE: u64 = 25;
+const MAX_GAS_BUMP_ATTEMPTS: u32 = 5;
+const WAIT_TIME: Duration = Duration::from_secs(10);
+const GAS_BUMP_PERCENTAGE: u64 = 12;
+const DEFAULT_PRIORITY_FEE_PER_GAS: u64 = 3_000_000_000;
 
 pub async fn handle_contract_call<S: ToString, O: Detokenize>(
     client: &SignerMiddleware<Provider<Http>, Wallet<SigningKey>>,
@@ -84,10 +85,16 @@ async fn send_tx_with_eip1559_gas_bump<S: ToString>(
                 let base_fee = get_base_fee(client.provider().url().as_str()).await?;
                 let priority_fee = current_tx
                     .max_priority_fee_per_gas
-                    .unwrap_or(U256::from(2_000_000_000));
+                    .unwrap_or(U256::from(DEFAULT_PRIORITY_FEE_PER_GAS));
+                let suggested_max_fee_per_gas = base_fee * 2 + priority_fee;
+                let max_fee_per_gas = current_tx
+                    .max_fee_per_gas
+                    .unwrap_or_else(|| suggested_max_fee_per_gas);
                 let new_priority_fee = priority_fee * (100 + gas_bump_percentage) / 100;
+                let new_max_fee_per_gas = suggested_max_fee_per_gas
+                    .max(max_fee_per_gas * (100 + gas_bump_percentage) / 100);
                 current_tx.max_priority_fee_per_gas = Some(new_priority_fee);
-                current_tx.max_fee_per_gas = Some(base_fee * 2 + new_priority_fee);
+                current_tx.max_fee_per_gas = Some(new_max_fee_per_gas);
                 log::info!(
                     "Bumping gas for {} tx attempt: {} with new max_fee_per_gas: {:?}, new max_priority_fee_per_gas: {:?}",
                     tx_name.to_string(),
