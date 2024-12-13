@@ -1067,6 +1067,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "ethers-rs-retry-tx"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dotenv",
+ "env_logger",
+ "envy",
+ "ethers",
+ "log",
+ "serde",
+ "thiserror 2.0.6",
+ "tokio",
+]
+
+[[package]]
 name = "ethers-signers"
 version = "2.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2769,21 +2784,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3cb6eb87a131f756572d7fb904f6e7b68633f09cca868c5df1c4b8d1a694bbba"
 dependencies = [
  "serde",
-]
-
-[[package]]
-name = "send-tx"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "dotenv",
- "env_logger",
- "envy",
- "ethers",
- "log",
- "serde",
- "thiserror 2.0.6",
- "tokio",
 ]
 
 [[package]]

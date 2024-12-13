@@ -1,5 +1,5 @@
 [package]
-name = "send-tx"
+name = "ethers-rs-retry-tx"
 version = "0.1.0"
 edition = "2021"
 
