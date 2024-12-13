@@ -36,10 +36,14 @@ pub async fn handle_contract_call<S: ToString, O: Detokenize>(
             let pending_tx = tx;
             let tx_hash = pending_tx.tx_hash();
             log::info!("{} tx hash: {:?}", tx_name.to_string(), tx_hash);
-            let tx: Transaction = with_retry(|| async { client.get_transaction(tx_hash).await })
-                .await
-                .map_err(|e| BlockchainError::RPCError(e.to_string()))?
-                .ok_or(BlockchainError::TxNotFound(tx_hash))?;
+            let tx: Transaction = with_retry(|| async {
+                client
+                    .get_transaction(tx_hash)
+                    .await
+                    .map_err(|e| BlockchainError::RPCError(e.to_string()))?
+                    .ok_or(BlockchainError::TxNotFound(tx_hash))
+            })
+            .await?;
             send_tx_with_eip1559_gas_bump(
                 client,
                 tx,
@@ -166,8 +170,6 @@ async fn set_gas_price<O>(
         O,
     >,
 ) -> Result<(), BlockchainError> {
-    let base_gas_fee_per_gas = get_base_fee(rpc_url).await?;
-    log::info!("base_gas_fee_per_gas: {:?}", base_gas_fee_per_gas);
     let (max_fee_per_gas, max_priority_fee_per_gas) = estimate_eip1559_fees(rpc_url).await?;
     log::info!(
         "max_fee_per_gas: {:?}, max_priority_fee_per_gas: {:?}",
