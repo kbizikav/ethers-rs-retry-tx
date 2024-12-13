@@ -22,7 +22,8 @@ async fn deploy_erc20_contract() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn approve_token() -> anyhow::Result<()> {
-    env_logger::init();
+    Builder::new().filter_level(LevelFilter::Info).init();
+
     dotenv::dotenv().ok();
     let env = envy::from_env::<crate::env::EnvVar>()?;
     let contract_address = std::env::var("CONTRACT_ADDRESS").expect("CONTRACT_ADDRESS must be set");
