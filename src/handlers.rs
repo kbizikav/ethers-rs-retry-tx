@@ -16,9 +16,9 @@ use crate::{
     utils::{estimate_eip1559_fees, get_base_fee},
 };
 
-const MAX_GAS_BUMP_ATTEMPTS: u32 = 5;
-const WAIT_TIME: Duration = Duration::from_secs(10);
-const GAS_BUMP_PERCENTAGE: u64 = 12;
+const MAX_GAS_BUMP_ATTEMPTS: u32 = 3;
+const WAIT_TIME: Duration = Duration::from_secs(20);
+const GAS_BUMP_PERCENTAGE: u64 = 25; // Should be above 10 to avoid replacement transaction underpriced error
 const DEFAULT_PRIORITY_FEE_PER_GAS: u64 = 3_000_000_000;
 
 pub async fn handle_contract_call<S: ToString, O: Detokenize>(
@@ -44,15 +44,7 @@ pub async fn handle_contract_call<S: ToString, O: Detokenize>(
                     .ok_or(BlockchainError::TxNotFound(tx_hash))
             })
             .await?;
-            send_tx_with_eip1559_gas_bump(
-                client,
-                tx,
-                tx_name,
-                MAX_GAS_BUMP_ATTEMPTS,
-                WAIT_TIME,
-                GAS_BUMP_PERCENTAGE,
-            )
-            .await
+            send_tx_with_eip1559_gas_bump(client, tx, tx_name).await
         }
         Err(e) => {
             let error_message = e.to_string();
@@ -69,16 +61,13 @@ async fn send_tx_with_eip1559_gas_bump<S: ToString>(
     client: &SignerMiddleware<Provider<Http>, Wallet<SigningKey>>,
     tx: Transaction,
     tx_name: S,
-    max_attempts: u32,
-    wait_time: Duration,
-    gas_bump_percentage: u64,
 ) -> Result<H256, BlockchainError> {
     let mut current_tx = tx.clone();
     let mut attempt = 0;
 
     let mut sent_tx = vec![current_tx.clone()];
-    while attempt < max_attempts {
-        sleep(wait_time).await;
+    while attempt < MAX_GAS_BUMP_ATTEMPTS {
+        sleep(WAIT_TIME).await;
         match check_if_tx_succeeded(client, current_tx.hash()).await? {
             Some(tx_hash) => {
                 log::info!("Tx succeeded with hash: {:?}", tx_hash);
@@ -94,9 +83,9 @@ async fn send_tx_with_eip1559_gas_bump<S: ToString>(
                 let max_fee_per_gas = current_tx
                     .max_fee_per_gas
                     .unwrap_or_else(|| suggested_max_fee_per_gas);
-                let new_priority_fee = priority_fee * (100 + gas_bump_percentage) / 100;
+                let new_priority_fee = priority_fee * (100 + GAS_BUMP_PERCENTAGE) / 100;
                 let new_max_fee_per_gas = suggested_max_fee_per_gas
-                    .max(max_fee_per_gas * (100 + gas_bump_percentage) / 100);
+                    .max(max_fee_per_gas * (100 + GAS_BUMP_PERCENTAGE) / 100);
                 current_tx.max_priority_fee_per_gas = Some(new_priority_fee);
                 current_tx.max_fee_per_gas = Some(new_max_fee_per_gas);
                 log::info!(
