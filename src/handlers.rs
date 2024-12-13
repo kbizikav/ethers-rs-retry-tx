@@ -17,8 +17,8 @@ use crate::{
 };
 
 const MAX_GAS_BUMP_ATTEMPTS: u32 = 3;
-const WAIT_TIME: Duration = Duration::from_secs(60);
-const GAS_BUMP_PERCENTAGE: u64 = 10;
+const WAIT_TIME: Duration = Duration::from_secs(1);
+const GAS_BUMP_PERCENTAGE: u64 = 25;
 
 pub async fn handle_contract_call<S: ToString, O: Detokenize>(
     client: &SignerMiddleware<Provider<Http>, Wallet<SigningKey>>,
@@ -70,26 +70,19 @@ async fn send_tx_with_eip1559_gas_bump<S: ToString>(
 ) -> Result<H256, BlockchainError> {
     let mut current_tx = tx.clone();
     let mut attempt = 0;
+
+    let mut sent_tx = vec![current_tx.clone()];
     while attempt < max_attempts {
         sleep(wait_time).await;
-        match client
-            .get_transaction_receipt(current_tx.hash)
-            .await
-            .map_err(|e| BlockchainError::RPCError(e.to_string()))?
-        {
-            Some(tx_receipt) => {
-                if tx_receipt.status.unwrap() != 1.into() {
-                    return Err(BlockchainError::TransactionFailed(format!(
-                        "{} failed with tx hash: {:?}",
-                        tx_name.to_string(),
-                        tx_receipt.transaction_hash
-                    )));
-                }
-                return Ok(tx_receipt.transaction_hash);
+        match check_if_tx_succeeded(client, current_tx.hash()).await? {
+            Some(tx_hash) => {
+                log::info!("Tx succeeded with hash: {:?}", tx_hash);
+                return Ok(tx_hash);
             }
             None => {
+                // Bump gas
                 let base_fee = get_base_fee(client.provider().url().as_str()).await?;
-                let priority_fee = tx
+                let priority_fee = current_tx
                     .max_priority_fee_per_gas
                     .unwrap_or(U256::from(2_000_000_000));
                 let new_priority_fee = priority_fee * (100 + gas_bump_percentage) / 100;
@@ -99,18 +92,64 @@ async fn send_tx_with_eip1559_gas_bump<S: ToString>(
                     "Bumping gas for {} tx attempt: {} with new max_fee_per_gas: {:?}, new max_priority_fee_per_gas: {:?}",
                     tx_name.to_string(),
                     attempt,
-                    current_tx.max_fee_per_gas,
-                    current_tx.max_priority_fee_per_gas
+                    current_tx.max_fee_per_gas.unwrap(),
+                    current_tx.max_priority_fee_per_gas.unwrap(),
                 );
-                client
-                    .send_transaction(&current_tx, None)
-                    .await
-                    .map_err(|e| BlockchainError::RPCError(e.to_string()))?;
-                attempt += 1;
+                let result = client.send_transaction(&current_tx, None).await;
+                match result {
+                    Ok(pending_tx) => {
+                        log::info!(
+                            "Replaced tx hash: {:?}, attempt={}",
+                            pending_tx.tx_hash(),
+                            attempt
+                        );
+                        sent_tx.push(current_tx.clone());
+                        attempt += 1;
+                    }
+                    Err(e) => {
+                        // If prev tx is successful, ignore it. Because the error is due to nonce mismatch
+                        for tx in sent_tx.iter().rev() {
+                            if let Some(tx_hash) = check_if_tx_succeeded(client, tx.hash).await? {
+                                log::info!("Previous tx succeeded with hash: {:?}", tx_hash);
+                                return Ok(tx_hash);
+                            }
+                        }
+                        let error_message = e.to_string();
+                        return Err(BlockchainError::TransactionError(format!(
+                            "{} failed with error: {:?}",
+                            tx_name.to_string(),
+                            error_message
+                        )));
+                    }
+                }
             }
         }
     }
     return Err(BlockchainError::MaxTxRetriesReached);
+}
+
+async fn check_if_tx_succeeded(
+    client: &SignerMiddleware<Provider<Http>, Wallet<SigningKey>>,
+    tx_hash: H256,
+) -> Result<Option<H256>, BlockchainError> {
+    match client
+        .get_transaction_receipt(tx_hash)
+        .await
+        .map_err(|e| BlockchainError::RPCError(e.to_string()))?
+    {
+        Some(tx_receipt) => {
+            if tx_receipt.status.unwrap() != 1.into() {
+                return Err(BlockchainError::TransactionFailed(format!(
+                    "Transaction failed with tx hash: {:?}",
+                    tx_receipt.transaction_hash
+                )));
+            }
+            return Ok(Some(tx_receipt.transaction_hash));
+        }
+        None => {
+            return Ok(None);
+        }
+    }
 }
 
 async fn set_gas_price<O>(
@@ -120,6 +159,8 @@ async fn set_gas_price<O>(
         O,
     >,
 ) -> Result<(), BlockchainError> {
+    let base_gas_fee_per_gas = get_base_fee(rpc_url).await?;
+    log::info!("base_gas_fee_per_gas: {:?}", base_gas_fee_per_gas);
     let (max_fee_per_gas, max_priority_fee_per_gas) = estimate_eip1559_fees(rpc_url).await?;
     log::info!(
         "max_fee_per_gas: {:?}, max_priority_fee_per_gas: {:?}",
